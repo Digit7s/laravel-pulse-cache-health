@@ -12,6 +12,7 @@ final readonly class MySqlIntegrationSettings
         public string $token,
         public string $host,
         public int $port,
+        public int $expectedServerPort,
         public string $database,
         public string $username,
         public string $password,
@@ -35,6 +36,7 @@ final readonly class MySqlIntegrationSettings
         $token = getenv('PULSE_CACHE_HEALTH_MYSQL_TEST_TOKEN');
         $host = getenv('PULSE_CACHE_HEALTH_MYSQL_TEST_HOST');
         $port = getenv('PULSE_CACHE_HEALTH_MYSQL_TEST_PORT');
+        $expectedServerPort = getenv('PULSE_CACHE_HEALTH_MYSQL_EXPECTED_SERVER_PORT');
         $database = getenv('PULSE_CACHE_HEALTH_MYSQL_TEST_DATABASE');
         $username = getenv('PULSE_CACHE_HEALTH_MYSQL_TEST_USERNAME');
         $password = getenv('PULSE_CACHE_HEALTH_MYSQL_TEST_PASSWORD');
@@ -67,6 +69,13 @@ final readonly class MySqlIntegrationSettings
             throw new RuntimeException('Refusing MySQL integration tests: invalid local test port.');
         }
 
+        if (! is_string($expectedServerPort)
+            || ! ctype_digit($expectedServerPort)
+            || (int) $expectedServerPort < 1
+            || (int) $expectedServerPort > 65535) {
+            throw new RuntimeException('Refusing MySQL integration tests: expected MySQL server port is missing or invalid.');
+        }
+
         if ($database !== "pulse_cache_health_test_{$suffix}") {
             throw new RuntimeException('Refusing MySQL integration tests: database name does not match the isolation token.');
         }
@@ -91,6 +100,7 @@ final readonly class MySqlIntegrationSettings
             token: $token,
             host: $host,
             port: (int) $port,
+            expectedServerPort: (int) $expectedServerPort,
             database: $database,
             username: $username,
             password: $password,
@@ -99,5 +109,27 @@ final readonly class MySqlIntegrationSettings
             expectedDataDirectory: rtrim($dataDirectory, '/').'/',
             expectedVersionPrefix: $versionPrefix,
         );
+    }
+
+    public function assertServerIdentity(object $identity): void
+    {
+        $serverVersion = $identity->server_version ?? null;
+        $databaseName = $identity->database_name ?? null;
+        $serverPort = $identity->server_port ?? null;
+        $dataDirectory = $identity->data_directory ?? null;
+        $hasExpectedServerPort = is_int($serverPort)
+            ? $serverPort === $this->expectedServerPort
+            : is_string($serverPort)
+                && ctype_digit($serverPort)
+                && (int) $serverPort === $this->expectedServerPort;
+
+        if (! is_string($serverVersion)
+            || ! str_starts_with($serverVersion, $this->expectedVersionPrefix)
+            || $databaseName !== $this->database
+            || ! $hasExpectedServerPort
+            || ! is_string($dataDirectory)
+            || rtrim($dataDirectory, '/').'/' !== $this->expectedDataDirectory) {
+            throw new RuntimeException('Refusing MySQL integration tests: connected server identity did not match the isolated target.');
+        }
     }
 }
