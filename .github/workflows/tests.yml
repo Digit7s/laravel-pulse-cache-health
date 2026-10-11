@@ -1,0 +1,133 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.4', '8.5']
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ format('{0}-{1}-mysql', github.run_id, github.run_attempt) }}
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+        ports:
+          - 3306
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          extensions: pdo_mysql, pdo_sqlite
+          tools: composer:v2
+
+      - name: Validate Composer metadata
+        run: composer validate --strict
+
+      - name: Resolve and install dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Record tested runtime versions
+        run: |
+          php_version="$(php -r 'echo PHP_VERSION;')"
+          laravel_version="$(composer show laravel/framework --format=json --no-ansi | php -r '$package = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR); echo $package["versions"][0];')"
+          pulse_version="$(composer show laravel/pulse --format=json --no-ansi | php -r '$package = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR); echo $package["versions"][0];')"
+          {
+            echo '### Runtime versions'
+            echo "PHP: \`${php_version}\`"
+            echo "Laravel: \`${laravel_version}\`"
+            echo "Pulse: \`${pulse_version}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare isolated MySQL test accounts
+        id: mysql
+        env:
+          MYSQL_SERVICE_PORT: ${{ job.services.mysql.ports[3306] }}
+          MYSQL_ROOT_PASSWORD: ${{ format('{0}-{1}-mysql', github.run_id, github.run_attempt) }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${MYSQL_ROOT_PASSWORD}"
+          export MYSQL_PWD="$MYSQL_ROOT_PASSWORD"
+          token="$(openssl rand -hex 16)"
+          suffix="${token:0:12}"
+          database="pulse_cache_health_test_${suffix}"
+          username="pch_it_${suffix}"
+          process_username="pch_proc_${suffix}"
+          password="$(openssl rand -hex 24)"
+          process_password="$(openssl rand -hex 24)"
+          echo "::add-mask::${password}"
+          echo "::add-mask::${process_password}"
+
+          mysql --protocol=TCP --host=127.0.0.1 --port="$MYSQL_SERVICE_PORT" --user=root <<SQL
+          CREATE DATABASE \`${database}\`;
+          CREATE USER '${username}'@'%' IDENTIFIED BY '${password}';
+          GRANT SELECT, CREATE, INSERT, ALTER, INDEX, DROP ON \`${database}\`.* TO '${username}'@'%';
+          CREATE USER '${process_username}'@'%' IDENTIFIED BY '${process_password}';
+          GRANT SELECT, CREATE, INSERT, ALTER, INDEX, DROP ON \`${database}\`.* TO '${process_username}'@'%';
+          GRANT PROCESS ON *.* TO '${process_username}'@'%';
+          SQL
+
+          server_version="$(mysql --protocol=TCP --host=127.0.0.1 --port="$MYSQL_SERVICE_PORT" --user=root --batch --skip-column-names --execute='SELECT VERSION()')"
+          data_directory="$(mysql --protocol=TCP --host=127.0.0.1 --port="$MYSQL_SERVICE_PORT" --user=root --batch --skip-column-names --execute='SELECT @@datadir')"
+          case "$server_version" in
+            8.4.*) ;;
+            *) echo "Expected MySQL 8.4, received ${server_version}" >&2; exit 1 ;;
+          esac
+
+          {
+            echo "PULSE_CACHE_HEALTH_MYSQL_TESTS=1"
+            echo "PULSE_CACHE_HEALTH_MYSQL_TEST_TOKEN=${token}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_TEST_HOST=127.0.0.1"
+            echo "PULSE_CACHE_HEALTH_MYSQL_TEST_PORT=${MYSQL_SERVICE_PORT}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_TEST_DATABASE=${database}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_TEST_USERNAME=${username}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_TEST_PASSWORD=${password}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_PROCESS_USERNAME=${process_username}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_PROCESS_PASSWORD=${process_password}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_EXPECTED_DATADIR=${data_directory}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_EXPECTED_VERSION=8.4."
+          } >> "$GITHUB_ENV"
+
+          {
+            echo '### MySQL integration target'
+            echo "Verified service version: \`${server_version}\`"
+            echo 'Target: isolated MySQL 8.4 service container'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Run MySQL 8.4 integration suite
+        run: composer test:mysql:required
+
+      - name: Run package unit and feature tests
+        env:
+          PULSE_CACHE_HEALTH_MYSQL_TESTS: '0'
+        run: composer test
+
+      - name: Check formatting
+        run: composer lint
+
+      - name: Check installed platform requirements
+        run: composer check-platform-reqs
+
+      - name: Check patch whitespace
+        run: git diff --check
