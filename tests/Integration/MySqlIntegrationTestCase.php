@@ -8,7 +8,6 @@ use Digit7s\PulseCacheHealth\Tests\Support\MySqlIntegrationSettings;
 use Digit7s\PulseCacheHealth\Tests\TestCase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use RuntimeException;
 
 abstract class MySqlIntegrationTestCase extends TestCase
 {
@@ -33,12 +32,7 @@ abstract class MySqlIntegrationTestCase extends TestCase
             'SELECT VERSION() AS server_version, DATABASE() AS database_name, @@port AS server_port, @@datadir AS data_directory',
         );
 
-        if (! str_starts_with((string) $identity->server_version, $settings->expectedVersionPrefix)
-            || $identity->database_name !== $settings->database
-            || (int) $identity->server_port !== $settings->port
-            || rtrim((string) $identity->data_directory, '/').'/' !== $settings->expectedDataDirectory) {
-            throw new RuntimeException('Refusing MySQL integration tests: connected server identity did not match the isolated target.');
-        }
+        $settings->assertServerIdentity($identity);
 
         $this->createFixtureTable('cache_fixture_'.$settings->tokenSuffix());
     }

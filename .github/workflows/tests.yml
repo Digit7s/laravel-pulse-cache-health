@@ -89,17 +89,23 @@ jobs:
           SQL
 
           server_version="$(mysql --protocol=TCP --host=127.0.0.1 --port="$MYSQL_SERVICE_PORT" --user=root --batch --skip-column-names --execute='SELECT VERSION()')"
+          server_port="$(mysql --protocol=TCP --host=127.0.0.1 --port="$MYSQL_SERVICE_PORT" --user=root --batch --skip-column-names --execute='SELECT @@port')"
           data_directory="$(mysql --protocol=TCP --host=127.0.0.1 --port="$MYSQL_SERVICE_PORT" --user=root --batch --skip-column-names --execute='SELECT @@datadir')"
           case "$server_version" in
             8.4.*) ;;
             *) echo "Expected MySQL 8.4, received ${server_version}" >&2; exit 1 ;;
           esac
+          if [[ "$server_port" != "3306" ]]; then
+            echo "Expected MySQL server-side port 3306, received ${server_port}" >&2
+            exit 1
+          fi
 
           {
             echo "PULSE_CACHE_HEALTH_MYSQL_TESTS=1"
             echo "PULSE_CACHE_HEALTH_MYSQL_TEST_TOKEN=${token}"
             echo "PULSE_CACHE_HEALTH_MYSQL_TEST_HOST=127.0.0.1"
             echo "PULSE_CACHE_HEALTH_MYSQL_TEST_PORT=${MYSQL_SERVICE_PORT}"
+            echo "PULSE_CACHE_HEALTH_MYSQL_EXPECTED_SERVER_PORT=${server_port}"
             echo "PULSE_CACHE_HEALTH_MYSQL_TEST_DATABASE=${database}"
             echo "PULSE_CACHE_HEALTH_MYSQL_TEST_USERNAME=${username}"
             echo "PULSE_CACHE_HEALTH_MYSQL_TEST_PASSWORD=${password}"
@@ -112,6 +118,7 @@ jobs:
           {
             echo '### MySQL integration target'
             echo "Verified service version: \`${server_version}\`"
+            echo "Verified MySQL server-side port: \`${server_port}\` (client port is dynamically mapped)"
             echo 'Target: isolated MySQL 8.4 service container'
           } >> "$GITHUB_STEP_SUMMARY"
 

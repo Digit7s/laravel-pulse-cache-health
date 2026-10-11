@@ -41,6 +41,7 @@ it('allows only the explicitly gated GitHub MySQL service outside loopback', fun
         'PULSE_CACHE_HEALTH_MYSQL_TEST_TOKEN',
         'PULSE_CACHE_HEALTH_MYSQL_TEST_HOST',
         'PULSE_CACHE_HEALTH_MYSQL_TEST_PORT',
+        'PULSE_CACHE_HEALTH_MYSQL_EXPECTED_SERVER_PORT',
         'PULSE_CACHE_HEALTH_MYSQL_TEST_DATABASE',
         'PULSE_CACHE_HEALTH_MYSQL_TEST_USERNAME',
         'PULSE_CACHE_HEALTH_MYSQL_TEST_PASSWORD',
@@ -63,6 +64,7 @@ it('allows only the explicitly gated GitHub MySQL service outside loopback', fun
     putenv("PULSE_CACHE_HEALTH_MYSQL_TEST_TOKEN={$token}");
     putenv('PULSE_CACHE_HEALTH_MYSQL_TEST_HOST=mysql');
     putenv('PULSE_CACHE_HEALTH_MYSQL_TEST_PORT=3306');
+    putenv('PULSE_CACHE_HEALTH_MYSQL_EXPECTED_SERVER_PORT=3306');
     putenv("PULSE_CACHE_HEALTH_MYSQL_TEST_DATABASE=pulse_cache_health_test_{$suffix}");
     putenv("PULSE_CACHE_HEALTH_MYSQL_TEST_USERNAME=pch_it_{$suffix}");
     putenv('PULSE_CACHE_HEALTH_MYSQL_TEST_PASSWORD=test-password');
@@ -81,7 +83,8 @@ it('allows only the explicitly gated GitHub MySQL service outside loopback', fun
 
         expect($settings)->toBeInstanceOf(MySqlIntegrationSettings::class)
             ->and($settings->host)->toBe('mysql')
-            ->and($settings->port)->toBe(3306);
+            ->and($settings->port)->toBe(3306)
+            ->and($settings->expectedServerPort)->toBe(3306);
     } finally {
         foreach ($previous as $key => $value) {
             putenv($value === false ? $key : "{$key}={$value}");
